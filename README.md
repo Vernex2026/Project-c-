@@ -106,8 +106,7 @@ przestrzeń danych z kontrolą dostępu wg ról.
 - **Magazyn i zamówienia** — stany części, przyjęcia/wydania, kolejka zamówień
   u dostawców, magazyn opon (wertykał moto).
 - **Komunikacja** — integracja Gmail (poczta), SMS, powiadomienia, czat zespołu.
-- **Faktury i finanse** — wystawianie faktur, integracja **KSeF**, udostępnianie
-  dokumentów.
+- **Faktury i finanse** — wystawianie faktur i udostępnianie dokumentów.
 - **Zespół i uprawnienia (RBAC)** — role owner/manager/technik/recepcja; każdy
   widzi tylko to, co powinien (izolacja danych na poziomie bazy).
 - **Analityka (telemetria)** — przychody, obłożenie, czasy napraw, koszty AI.
