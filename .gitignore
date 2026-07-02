@@ -2,9 +2,11 @@
 serwis
 serwis.exe
 
-# Pliki obiektowe / posrednie
+# Artefakty budowania
+bin/
 *.o
 *.obj
 
-# Dane runtime (baza zlecen)
+# Dane runtime (baza zlecen) + pliki testowe
 zlecenia.csv
+test_zlecenia.csv

@@ -1,8 +1,8 @@
 # SerwisPro Mini (C++)
 
-Konsolowy system zarządzania zleceniami serwisowymi napisany w czystym **C++17**.
-Projekt edukacyjny (na zajęcia) — pokazuje struktury i klasy, `enum class`, STL,
-obsługę plików CSV oraz interaktywne menu.
+Konsolowy system zarządzania zleceniami serwisowymi napisany w czystym **C++17**,
+z **warstwową architekturą** (separacja odpowiedzialności), **testami jednostkowymi**
+i budowaniem przez **Makefile**.
 
 > 🔗 **Prawdziwy projekt (produkcja):** to jest wersja konsolowa *mini*. Pełny,
 > działający system serwisowy autora znajdziesz tutaj:
@@ -11,59 +11,73 @@ obsługę plików CSV oraz interaktywne menu.
 
 ---
 
-## Kompilacja i uruchomienie
+## Budowanie i uruchomienie
 
 ```bash
-g++ -std=c++17 -Wall -O2 serwis.cpp -o serwis
-./serwis          # Windows: serwis.exe
+make          # buduje aplikacje ./serwis
+./serwis      # uruchamia (Windows: serwis.exe)
+
+make test     # buduje i uruchamia testy jednostkowe
+make clean    # usuwa artefakty budowania
 ```
 
-Program kompiluje się bez ostrzeżeń przy fladze `-Wall`.
+Kompiluje się bez ostrzeżeń pod `-Wall -Wextra`.
+
+## Architektura (separacja warstw)
+
+Kod jest podzielony na moduły o jednej odpowiedzialności — zależności biegną w jedną
+stronę, bez cykli. Kluczowa zasada: **logika nie drukuje na ekran i nie dotyka plików**.
+
+```
+include/ + src/
+  domena       Model: Zlecenie, enum Status/Priorytet, konwersje, data.
+  tekst        Narzędzia na łańcuchach: normalizacja, formatowanie, kodowanie CSV.
+  repozytorium CsvRepozytorium — JEDYNA warstwa I/O plików (zapis/odczyt CSV).
+  serwis       Serwis — CZYSTA logika: operacje na kolekcji, zwraca dane.
+  konsola      Warstwa UI: render tabel/kolorów, walidacja wejścia, pętla menu.
+  main         Composition root: spina repozytorium → serwis → aplikację.
+tests/
+  testy        Testy jednostkowe (bez bibliotek, na assert): Serwis, CSV, tekst.
+```
+
+Zależności: `main → konsola → serwis → domena`; `repozytorium → domena, tekst`.
+Dzięki temu logikę (`Serwis`) można testować w izolacji, bez konsoli i plików.
 
 ## Funkcje (menu)
 
-**Baza:**
-1. Dodaj zlecenie
-2. Lista zleceń
-3. Zmień status (Przyjęte → W trakcie → Gotowe → Wydane)
-4. Szukaj po ID
-5. Szukaj po kliencie (fragment nazwiska, bez rozróżniania wielkości liter)
-6. Usuń zlecenie
-7. Statystyki wg statusu
+**Baza:** dodawanie, lista, zmiana statusu (Przyjęte → W trakcie → Gotowe → Wydane),
+szukanie po ID i po kliencie, usuwanie, statystyki, zapis/odczyt CSV.
 
-**Akcenty (na wyższą ocenę):**
+**Rozszerzenia:**
 - **Data przyjęcia** zlecenia (`<ctime>`)
 - **Priorytet** (Niski / Normalny / Pilny) — drugi `enum class`
-- **Historia statusów** każdego zlecenia (wektor w zleceniu, widoczna przy szukaniu po ID)
+- **Historia statusów** każdego zlecenia (widoczna przy szukaniu po ID)
 - **Kolory w konsoli** (ANSI) — status wyróżniony kolorem
-- Ustawianie kosztu naprawy dla zlecenia
-- Filtr **„Gotowe do odbioru”** (lista klientów + telefony)
-- Sortowanie listy po koszcie (malejąco)
+- Ustawianie kosztu naprawy, filtr **„Gotowe do odbioru”**, sortowanie po koszcie (malejąco)
 - Łączny przychód (suma kosztów zleceń wydanych) + licznik zleceń pilnych
 
 ## Trwałość danych
 
-Zlecenia zapisują się do pliku **`zlecenia.csv`** (autozapis przy wyjściu oraz
-opcja ręcznego zapisu w menu). Przy starcie dane są automatycznie wczytywane,
-więc utrzymują się między uruchomieniami.
+Zlecenia zapisują się do pliku **`zlecenia.csv`** (autozapis przy wyjściu + opcja ręczna).
+Numeracja ID jest wyprowadzana z danych (`max(id)+1`), więc plik zawiera tylko rekordy.
+Pola ze znakami specjalnymi (`;`, `\`) są bezpiecznie kodowane (ucieczka).
 
 ## Co pokazuje technicznie
 
 | Element języka / biblioteki | Gdzie |
 |---|---|
-| `struct` + `class` | `Zlecenie`, `Serwis` |
-| dwa `enum class` + konwersje | `Status`, `Priorytet` + funkcje `*NaTekst` / `tekstNa*` |
-| `std::vector` (też wektor w zleceniu) | kolekcja zleceń + `historia` statusów |
-| STL + lambdy | `std::remove_if`, `std::sort`, `std::accumulate`, `std::count_if`, `std::transform` |
+| Architektura warstwowa | podział `domena` / `serwis` / `repozytorium` / `konsola` |
+| `struct` + klasy | `Zlecenie`, `Serwis`, `CsvRepozytorium`, `Aplikacja` |
+| dwa `enum class` + konwersje | `Status`, `Priorytet` (`include/domena.hpp`) |
+| `std::vector` (też wektor w zleceniu) | kolekcja zleceń + `historia` |
+| STL + lambdy | `std::find_if`, `std::remove_if`, `std::sort`, `std::accumulate`, `std::count_if`, `std::max_element` |
+| `std::optional` / `std::string_view` | parsowanie CSV / API konwersji |
 | Data / czas | `<ctime>` (`std::localtime`, `strftime`) |
-| Kolory ANSI | wyróżnienie statusu w tabeli |
-| Obsługa plików | `fstream`, `stringstream` (zapis/odczyt CSV z ucieczką separatora) |
-| Walidacja wejścia | `std::cin` fail → `clear()` + `ignore()` |
-| Formatowanie | `iomanip` (`setw`, `setprecision`, `fixed`) |
+| Obsługa plików | `fstream`, `stringstream` (CSV z ucieczką separatora) |
+| Testy jednostkowe | `tests/testy.cpp` (`make test`) |
 
 ## Cel projektu
 
-Pokazać podstawy programowania obiektowego i STL w C++ na praktycznym,
-zrozumiałym przykładzie (serwis komputerowy/AGD/RTV), z zachowaniem danych
-między uruchomieniami — jako mini-odpowiednik produkcyjnego systemu
-[SerwisPRO](https://serwispro.vernex.pl).
+Pokazać podstawy programowania obiektowego i STL w C++ z **solidnym podziałem na warstwy**
+(logika osobno od I/O i prezentacji) oraz pokryciem testami — jako mini-odpowiednik
+produkcyjnego systemu [SerwisPRO](https://serwispro.vernex.pl).
