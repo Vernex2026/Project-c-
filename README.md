@@ -81,3 +81,47 @@ Pola ze znakami specjalnymi (`;`, `\`) są bezpiecznie kodowane (ucieczka).
 Pokazać podstawy programowania obiektowego i STL w C++ z **solidnym podziałem na warstwy**
 (logika osobno od I/O i prezentacji) oraz pokryciem testami — jako mini-odpowiednik
 produkcyjnego systemu [SerwisPRO](https://serwispro.vernex.pl).
+
+---
+
+## O prawdziwym projekcie — SerwisPro (SaaS)
+
+**SerwisPro** to wielodostępowy (**multi-tenant**) system klasy **SaaS** dla
+serwisów elektroniki i motoryzacji w Polsce — od przyjęcia sprzętu, przez
+naprawę i komunikację z klientem, aż po fakturę. Zamiast zeszytu i Excela
+warsztat dostaje jedno spójne narzędzie działające w przeglądarce i jako
+aplikacja mobilna (**PWA**).
+
+### Plan / wizja
+Jeden panel, w którym mały i średni serwis prowadzi **cały cykl życia zlecenia**
+i całą firmę — bez sklejania kilku aplikacji. Każda firma to osobna, odizolowana
+przestrzeń danych z kontrolą dostępu wg ról.
+
+### Co potrafi
+- **Zlecenia serwisowe** — pełny obieg: przyjęcie → diagnoza → naprawa → wydanie,
+  z historią statusów, zdjęciami, kosztorysem i zapotrzebowaniem na części.
+- **Portal klienta przez QR** — klient skanuje kod i na żywo widzi status, koszt
+  i termin naprawy; może zaakceptować kosztorys i napisać do serwisu.
+- **Klienci i sprzęt** — baza klientów, urządzeń, pojazdów, historii napraw.
+- **Magazyn i zamówienia** — stany części, przyjęcia/wydania, kolejka zamówień
+  u dostawców, magazyn opon (wertykał moto).
+- **Komunikacja** — integracja Gmail (poczta), SMS, powiadomienia, czat zespołu.
+- **Faktury i finanse** — wystawianie faktur, integracja **KSeF**, udostępnianie
+  dokumentów.
+- **Zespół i uprawnienia (RBAC)** — role owner/manager/technik/recepcja; każdy
+  widzi tylko to, co powinien (izolacja danych na poziomie bazy).
+- **Analityka (telemetria)** — przychody, obłożenie, czasy napraw, koszty AI.
+- **Automatyzacje i asystent AI** — reguły, szablony, pomoc AI w obsłudze poczty.
+- **Marketplace i reklamacje (RMA)** — obrót częściami, obsługa gwarancji.
+
+### Co to daje
+- **Serwisowi:** mniej chaosu, szybsza obsługa, kontrola kosztów i pełen wgląd
+  w firmę z jednego miejsca — także z telefonu.
+- **Klientowi:** przejrzystość — wie co się dzieje z jego sprzętem, ile zapłaci
+  i kiedy odbierze, bez dzwonienia do serwisu.
+
+### Stack
+React + TypeScript + Vite (PWA), Supabase (Postgres z RLS, Auth, Storage,
+Edge Functions), deploy na Vercel.
+
+**Live:** https://serwispro.vernex.pl · **Kod:** https://github.com/Vernex2026/SerwisPRO
