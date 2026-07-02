@@ -32,10 +32,14 @@ Program kompiluje się bez ostrzeżeń przy fladze `-Wall`.
 7. Statystyki wg statusu
 
 **Akcenty (na wyższą ocenę):**
+- **Data przyjęcia** zlecenia (`<ctime>`)
+- **Priorytet** (Niski / Normalny / Pilny) — drugi `enum class`
+- **Historia statusów** każdego zlecenia (wektor w zleceniu, widoczna przy szukaniu po ID)
+- **Kolory w konsoli** (ANSI) — status wyróżniony kolorem
 - Ustawianie kosztu naprawy dla zlecenia
 - Filtr **„Gotowe do odbioru”** (lista klientów + telefony)
 - Sortowanie listy po koszcie (malejąco)
-- Łączny przychód (suma kosztów zleceń wydanych)
+- Łączny przychód (suma kosztów zleceń wydanych) + licznik zleceń pilnych
 
 ## Trwałość danych
 
@@ -48,9 +52,11 @@ więc utrzymują się między uruchomieniami.
 | Element języka / biblioteki | Gdzie |
 |---|---|
 | `struct` + `class` | `Zlecenie`, `Serwis` |
-| `enum class` + konwersje | `Status`, `statusNaTekst` / `tekstNaStatus` |
-| `std::vector` | kolekcja zleceń |
-| STL + lambdy | `std::remove_if`, `std::sort`, `std::accumulate`, `std::transform` |
+| dwa `enum class` + konwersje | `Status`, `Priorytet` + funkcje `*NaTekst` / `tekstNa*` |
+| `std::vector` (też wektor w zleceniu) | kolekcja zleceń + `historia` statusów |
+| STL + lambdy | `std::remove_if`, `std::sort`, `std::accumulate`, `std::count_if`, `std::transform` |
+| Data / czas | `<ctime>` (`std::localtime`, `strftime`) |
+| Kolory ANSI | wyróżnienie statusu w tabeli |
 | Obsługa plików | `fstream`, `stringstream` (zapis/odczyt CSV z ucieczką separatora) |
 | Walidacja wejścia | `std::cin` fail → `clear()` + `ignore()` |
 | Formatowanie | `iomanip` (`setw`, `setprecision`, `fixed`) |

@@ -1,7 +1,7 @@
 // ============================================================================
 //  SerwisPro Mini  —  konsolowy system zarzadzania zleceniami serwisowymi
 // ----------------------------------------------------------------------------
-//  Wersja edukacyjna (projekt na zajecia) autorstwa Vernex2026.
+//  Wersja edukacyjna (projekt na zajecia).
 //  Pelna, produkcyjna wersja dziala pod adresem:
 //      Strona : https://serwispro.vernex.pl
 //      Kod    : https://github.com/Vernex2026/SerwisPRO
@@ -9,9 +9,10 @@
 //  Kompilacja:  g++ -std=c++17 -Wall -O2 serwis.cpp -o serwis
 //  Uruchomienie: ./serwis        (Windows: serwis.exe)
 //
-//  Co pokazuje technicznie: struct + class, enum class, std::vector, STL
-//  (remove_if / sort / accumulate + lambdy), obsluga plikow (fstream /
-//  stringstream), walidacja wejscia oraz formatowanie (iomanip).
+//  Pokazuje: struct + class, dwa enum class, std::vector (tez wektor w
+//  zleceniu), STL (remove_if / sort / accumulate / count_if + lambdy),
+//  obsluge plikow (fstream / stringstream), date (ctime), kolory ANSI,
+//  walidacje wejscia i formatowanie (iomanip).
 // ============================================================================
 
 #include <iostream>
@@ -23,13 +24,27 @@
 #include <numeric>
 #include <iomanip>
 #include <limits>
+#include <ctime>
 
 // ---------------------------------------------------------------------------
-//  Status zlecenia (enum class -> bezpieczny typ, brak niejawnych konwersji)
+//  Typy wyliczeniowe
 // ---------------------------------------------------------------------------
-enum class Status { Przyjete, WTrakcie, Gotowe, Wydane };
+enum class Status    { Przyjete, WTrakcie, Gotowe, Wydane };
+enum class Priorytet { Niski, Normalny, Pilny };
 
-// Zamiana statusu na czytelny tekst (do wyswietlania i zapisu CSV).
+// Kolory ANSI (dzialaja w Linux/macOS i nowym terminalu Windows).
+constexpr const char* RESET = "\033[0m";
+
+const char* kolorStatus(Status s) {
+    switch (s) {
+        case Status::Przyjete: return "\033[36m";  // cyan
+        case Status::WTrakcie: return "\033[33m";  // zolty
+        case Status::Gotowe:   return "\033[32m";  // zielony
+        case Status::Wydane:   return "\033[90m";  // szary
+    }
+    return RESET;
+}
+
 std::string statusNaTekst(Status s) {
     switch (s) {
         case Status::Przyjete: return "Przyjete";
@@ -37,15 +52,34 @@ std::string statusNaTekst(Status s) {
         case Status::Gotowe:   return "Gotowe";
         case Status::Wydane:   return "Wydane";
     }
-    return "Nieznany";
+    return "?";
 }
-
-// Odwrotna zamiana (przy wczytywaniu z pliku CSV).
 Status tekstNaStatus(const std::string& t) {
     if (t == "W trakcie") return Status::WTrakcie;
     if (t == "Gotowe")    return Status::Gotowe;
     if (t == "Wydane")    return Status::Wydane;
     return Status::Przyjete;
+}
+
+std::string priorytetNaTekst(Priorytet p) {
+    switch (p) {
+        case Priorytet::Niski:  return "Niski";
+        case Priorytet::Pilny:  return "PILNY";
+        default:                return "Normalny";
+    }
+}
+Priorytet tekstNaPriorytet(const std::string& t) {
+    if (t == "Niski") return Priorytet::Niski;
+    if (t == "PILNY") return Priorytet::Pilny;
+    return Priorytet::Normalny;
+}
+
+// Dzisiejsza data w formacie YYYY-MM-DD.
+std::string dzisiaj() {
+    std::time_t t = std::time(nullptr);
+    char buf[11];
+    std::strftime(buf, sizeof(buf), "%Y-%m-%d", std::localtime(&t));
+    return buf;
 }
 
 // ---------------------------------------------------------------------------
@@ -57,135 +91,182 @@ struct Zlecenie {
     std::string telefon;
     std::string urzadzenie;
     std::string opis;
-    Status      status;
-    double      koszt;
+    Status      status    = Status::Przyjete;
+    Priorytet   priorytet = Priorytet::Normalny;
+    double      koszt     = 0.0;
+    std::string data;                       // data przyjecia
+    std::vector<std::string> historia;      // log zmian ("data - status")
 };
+
+// ---------------------------------------------------------------------------
+//  Male pomocnicze funkcje formatujace / tekstowe
+// ---------------------------------------------------------------------------
+namespace pom {
+    std::string naMale(std::string s) {
+        std::transform(s.begin(), s.end(), s.begin(),
+                       [](unsigned char c) { return std::tolower(c); });
+        return s;
+    }
+    std::string skroc(const std::string& s, std::size_t maks) {
+        return s.size() <= maks ? s
+             : s.substr(0, maks > 1 ? maks - 1 : 1) + ".";
+    }
+    std::string dopelnij(std::string s, std::size_t w) {   // wyrownanie do lewej
+        if (s.size() < w) s.append(w - s.size(), ' ');
+        return s;
+    }
+    // Ucieczka znakow specjalnych przy zapisie CSV (separator to ';').
+    std::string escape(const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if      (c == ';')  out += "\\;";
+            else if (c == '\n') out += "\\n";
+            else if (c == '\\') out += "\\\\";
+            else                out += c;
+        }
+        return out;
+    }
+    std::string unescape(const std::string& s) {
+        std::string out;
+        for (std::size_t i = 0; i < s.size(); ++i) {
+            if (s[i] == '\\' && i + 1 < s.size()) {
+                char n = s[++i];
+                out += (n == 'n') ? '\n' : n;
+            } else out += s[i];
+        }
+        return out;
+    }
+    // Podzial wiersza po separatorze z poszanowaniem ucieczek '\\x'.
+    std::vector<std::string> podziel(const std::string& s, char sep) {
+        std::vector<std::string> pola;
+        std::string b;
+        for (std::size_t i = 0; i < s.size(); ++i) {
+            if (s[i] == '\\' && i + 1 < s.size()) { b += s[i]; b += s[++i]; }
+            else if (s[i] == sep) { pola.push_back(b); b.clear(); }
+            else                  b += s[i];
+        }
+        pola.push_back(b);
+        return pola;
+    }
+    // Zlaczenie / rozbicie listy tekstow jednym znakiem (do historii w CSV).
+    std::string zlacz(const std::vector<std::string>& v, char sep) {
+        std::string out;
+        for (std::size_t i = 0; i < v.size(); ++i) {
+            if (i) out += sep;
+            out += v[i];
+        }
+        return out;
+    }
+}
 
 // ---------------------------------------------------------------------------
 //  Klasa zarzadzajaca kolekcja zlecen
 // ---------------------------------------------------------------------------
 class Serwis {
 public:
-    static constexpr char PLIK[] = "zlecenia.csv";
+    static constexpr const char* PLIK = "zlecenia.csv";
 
     // Dodanie nowego zlecenia; zwraca nadany numer ID.
     int dodaj(const std::string& klient, const std::string& telefon,
-              const std::string& urzadzenie, const std::string& opis) {
+              const std::string& urzadzenie, const std::string& opis,
+              Priorytet priorytet) {
         Zlecenie z;
         z.id         = nastepneId++;
         z.klient     = klient;
         z.telefon    = telefon;
         z.urzadzenie = urzadzenie;
         z.opis       = opis;
-        z.status     = Status::Przyjete;
-        z.koszt      = 0.0;
+        z.priorytet  = priorytet;
+        z.data       = dzisiaj();
+        z.historia.push_back(z.data + " - " + statusNaTekst(z.status));
         zlecenia.push_back(z);
         return z.id;
     }
 
     // Lista wszystkich zlecen (opcjonalnie posortowana po koszcie malejaco).
     void lista(bool wgKosztu = false) const {
-        if (zlecenia.empty()) {
-            std::cout << "  (brak zlecen)\n";
-            return;
-        }
-        std::vector<Zlecenie> kopia = zlecenia;   // sortujemy kopie, nie oryginal
-        if (wgKosztu) {
+        if (zlecenia.empty()) { std::cout << "  (brak zlecen)\n"; return; }
+        std::vector<Zlecenie> kopia = zlecenia;      // sortujemy kopie
+        if (wgKosztu)
             std::sort(kopia.begin(), kopia.end(),
                       [](const Zlecenie& a, const Zlecenie& b) { return a.koszt > b.koszt; });
-        }
-        naglowekTabeli();
-        for (const auto& z : kopia) wierszTabeli(z);
+        naglowek();
+        for (const auto& z : kopia) wiersz(z);
     }
 
-    // Zmiana statusu zlecenia o danym ID.
     void zmienStatus(int id, Status s) {
         if (Zlecenie* z = znajdz(id)) {
             z->status = s;
+            z->historia.push_back(dzisiaj() + " - " + statusNaTekst(s));
             std::cout << "  OK: SRV-" << id << " -> " << statusNaTekst(s) << "\n";
-        } else {
-            std::cout << "  !! Brak zlecenia SRV-" << id << "\n";
-        }
+        } else brak(id);
     }
 
-    // Wyszukiwanie po ID.
-    void szukajPoId(int id) const {
-        if (const Zlecenie* z = znajdz(id)) {
-            naglowekTabeli();
-            wierszTabeli(*z);
-        } else {
-            std::cout << "  !! Brak zlecenia SRV-" << id << "\n";
-        }
-    }
-
-    // Wyszukiwanie po (fragmencie) nazwiska klienta — bez rozroznienia wielkosci.
-    void szukajPoKliencie(const std::string& fraza) const {
-        std::string szukane = naMale(fraza);
-        bool cos = false;
-        for (const auto& z : zlecenia) {
-            if (naMale(z.klient).find(szukane) != std::string::npos) {
-                if (!cos) naglowekTabeli();
-                wierszTabeli(z);
-                cos = true;
-            }
-        }
-        if (!cos) std::cout << "  (brak dopasowan dla: " << fraza << ")\n";
-    }
-
-    // Usuniecie zlecenia po ID (STL remove_if + lambda).
-    void usun(int id) {
-        auto it = std::remove_if(zlecenia.begin(), zlecenia.end(),
-                                 [id](const Zlecenie& z) { return z.id == id; });
-        if (it != zlecenia.end()) {
-            zlecenia.erase(it, zlecenia.end());
-            std::cout << "  OK: usunieto SRV-" << id << "\n";
-        } else {
-            std::cout << "  !! Brak zlecenia SRV-" << id << "\n";
-        }
-    }
-
-    // Statystyki wg statusu.
-    void statystyki() const {
-        int licz[4] = {0, 0, 0, 0};
-        for (const auto& z : zlecenia) licz[static_cast<int>(z.status)]++;
-        std::cout << "  Zlecen lacznie : " << zlecenia.size() << "\n";
-        std::cout << "  Przyjete       : " << licz[0] << "\n";
-        std::cout << "  W trakcie      : " << licz[1] << "\n";
-        std::cout << "  Gotowe         : " << licz[2] << "\n";
-        std::cout << "  Wydane         : " << licz[3] << "\n";
-        std::cout << "  Przychod (wydane): " << std::fixed << std::setprecision(2)
-                  << sumaPrzychodu() << " zl\n";
-    }
-
-    // --- Akcenty (na wyzsza ocene) --------------------------------------
-
-    // Ustawienie kosztu naprawy dla zlecenia o danym ID.
     void ustawKoszt(int id, double k) {
         if (Zlecenie* z = znajdz(id)) {
             z->koszt = k;
             std::cout << "  OK: koszt SRV-" << id << " = "
                       << std::fixed << std::setprecision(2) << k << " zl\n";
-        } else {
-            std::cout << "  !! Brak zlecenia SRV-" << id << "\n";
-        }
+        } else brak(id);
     }
 
-    // Lista tylko zlecen gotowych do odbioru (Status::Gotowe).
+    void szukajPoId(int id) const {
+        const Zlecenie* z = znajdz(id);
+        if (!z) { brak(id); return; }
+        naglowek();
+        wiersz(*z);
+        std::cout << "  Historia:\n";
+        for (const auto& h : z->historia) std::cout << "    - " << h << "\n";
+    }
+
+    void szukajPoKliencie(const std::string& fraza) const {
+        std::string szukane = pom::naMale(fraza);
+        bool cos = false;
+        for (const auto& z : zlecenia)
+            if (pom::naMale(z.klient).find(szukane) != std::string::npos) {
+                if (!cos) naglowek();
+                wiersz(z);
+                cos = true;
+            }
+        if (!cos) std::cout << "  (brak dopasowan dla: " << fraza << ")\n";
+    }
+
+    void usun(int id) {
+        auto it = std::remove_if(zlecenia.begin(), zlecenia.end(),
+                                 [id](const Zlecenie& z) { return z.id == id; });
+        if (it == zlecenia.end()) { brak(id); return; }
+        zlecenia.erase(it, zlecenia.end());
+        std::cout << "  OK: usunieto SRV-" << id << "\n";
+    }
+
     void gotoweDoOdbioru() const {
         bool cos = false;
-        for (const auto& z : zlecenia) {
+        for (const auto& z : zlecenia)
             if (z.status == Status::Gotowe) {
                 if (!cos) std::cout << "  Gotowe do odbioru:\n";
                 std::cout << "    SRV-" << z.id << "  " << z.klient
-                          << "  tel: " << z.telefon
-                          << "  (" << z.urzadzenie << ")\n";
+                          << "  tel: " << z.telefon << "  (" << z.urzadzenie << ")\n";
                 cos = true;
             }
-        }
         if (!cos) std::cout << "  (nic nie czeka na odbior)\n";
     }
 
-    // Laczny przychod = suma kosztow zlecen juz wydanych (STL accumulate).
+    void statystyki() const {
+        int licz[4] = {0, 0, 0, 0};
+        for (const auto& z : zlecenia) licz[static_cast<int>(z.status)]++;
+        long pilne = std::count_if(zlecenia.begin(), zlecenia.end(),
+            [](const Zlecenie& z) { return z.priorytet == Priorytet::Pilny; });
+        std::cout << "  Zlecen lacznie : " << zlecenia.size() << "\n"
+                  << "  Przyjete       : " << licz[0] << "\n"
+                  << "  W trakcie      : " << licz[1] << "\n"
+                  << "  Gotowe         : " << licz[2] << "\n"
+                  << "  Wydane         : " << licz[3] << "\n"
+                  << "  Pilne          : " << pilne  << "\n"
+                  << "  Przychod (wydane): " << std::fixed << std::setprecision(2)
+                  << sumaPrzychodu() << " zl\n";
+    }
+
+    // Laczny przychod = suma kosztow zlecen wydanych.
     double sumaPrzychodu() const {
         return std::accumulate(zlecenia.begin(), zlecenia.end(), 0.0,
             [](double suma, const Zlecenie& z) {
@@ -194,22 +275,23 @@ public:
     }
 
     // --- Trwalosc (CSV) -------------------------------------------------
-
-    // Zapis wszystkich zlecen do pliku CSV.
     bool zapisz() const {
         std::ofstream out(PLIK);
         if (!out) return false;
-        out << nastepneId << "\n";                     // pierwszy wiersz: licznik ID
+        out << nastepneId << "\n";
         for (const auto& z : zlecenia) {
-            out << z.id << ';' << escape(z.klient) << ';' << escape(z.telefon) << ';'
-                << escape(z.urzadzenie) << ';' << escape(z.opis) << ';'
+            std::vector<std::string> h;
+            for (const auto& e : z.historia) h.push_back(pom::escape(e));
+            out << z.id << ';' << pom::escape(z.klient) << ';' << pom::escape(z.telefon) << ';'
+                << pom::escape(z.urzadzenie) << ';' << pom::escape(z.opis) << ';'
                 << statusNaTekst(z.status) << ';'
-                << std::fixed << std::setprecision(2) << z.koszt << "\n";
+                << std::fixed << std::setprecision(2) << z.koszt << ';'
+                << z.data << ';' << priorytetNaTekst(z.priorytet) << ';'
+                << pom::zlacz(h, '|') << "\n";
         }
         return true;
     }
 
-    // Wczytanie zlecen z pliku CSV (jesli istnieje).
     void wczytaj() {
         std::ifstream in(PLIK);
         if (!in) return;
@@ -222,16 +304,23 @@ public:
         zlecenia.clear();
         while (std::getline(in, linia)) {
             if (linia.empty()) continue;
-            std::vector<std::string> pola = podziel(linia, ';');
-            if (pola.size() < 7) continue;
+            auto p = pom::podziel(linia, ';');
+            if (p.size() < 7) continue;                 // za malo pol -> pomijamy
             Zlecenie z;
-            z.id         = std::stoi(pola[0]);
-            z.klient     = unescape(pola[1]);
-            z.telefon    = unescape(pola[2]);
-            z.urzadzenie = unescape(pola[3]);
-            z.opis       = unescape(pola[4]);
-            z.status     = tekstNaStatus(pola[5]);
-            z.koszt      = std::stod(pola[6]);
+            z.id         = std::stoi(p[0]);
+            z.klient     = pom::unescape(p[1]);
+            z.telefon    = pom::unescape(p[2]);
+            z.urzadzenie = pom::unescape(p[3]);
+            z.opis       = pom::unescape(p[4]);
+            z.status     = tekstNaStatus(p[5]);
+            z.koszt      = std::stod(p[6]);
+            z.data       = p.size() > 7 ? p[7] : dzisiaj();
+            z.priorytet  = p.size() > 8 ? tekstNaPriorytet(p[8]) : Priorytet::Normalny;
+            if (p.size() > 9 && !p[9].empty())
+                for (const auto& e : pom::podziel(p[9], '|'))
+                    z.historia.push_back(pom::unescape(e));
+            if (z.historia.empty())
+                z.historia.push_back(z.data + " - " + statusNaTekst(z.status));
             zlecenia.push_back(z);
         }
     }
@@ -240,7 +329,6 @@ private:
     std::vector<Zlecenie> zlecenia;
     int                   nastepneId = 1;
 
-    // Szukanie wskaznika na zlecenie o danym ID (wersja modyfikujaca i stala).
     Zlecenie* znajdz(int id) {
         for (auto& z : zlecenia) if (z.id == id) return &z;
         return nullptr;
@@ -249,124 +337,56 @@ private:
         for (const auto& z : zlecenia) if (z.id == id) return &z;
         return nullptr;
     }
+    static void brak(int id) { std::cout << "  !! Brak zlecenia SRV-" << id << "\n"; }
 
-    static void naglowekTabeli() {
+    static void naglowek() {
         std::cout << "  " << std::left
                   << std::setw(8)  << "ID"
-                  << std::setw(18) << "Klient"
-                  << std::setw(16) << "Urzadzenie"
-                  << std::setw(12) << "Status"
-                  << std::right << std::setw(10) << "Koszt" << "\n";
-        std::cout << "  " << std::string(62, '-') << "\n";
+                  << std::setw(16) << "Klient"
+                  << std::setw(14) << "Urzadzenie"
+                  << std::setw(9)  << "Prio"
+                  << std::setw(11) << "Status"
+                  << std::right << std::setw(10) << "Koszt" << "\n"
+                  << "  " << std::string(66, '-') << "\n";
     }
-
-    static void wierszTabeli(const Zlecenie& z) {
+    static void wiersz(const Zlecenie& z) {
         std::cout << "  " << std::left
                   << std::setw(8)  << ("SRV-" + std::to_string(z.id))
-                  << std::setw(18) << skroc(z.klient, 17)
-                  << std::setw(16) << skroc(z.urzadzenie, 15)
-                  << std::setw(12) << statusNaTekst(z.status)
+                  << std::setw(16) << pom::skroc(z.klient, 15)
+                  << std::setw(14) << pom::skroc(z.urzadzenie, 13)
+                  << std::setw(9)  << priorytetNaTekst(z.priorytet)
+                  << kolorStatus(z.status) << pom::dopelnij(statusNaTekst(z.status), 11) << RESET
                   << std::right << std::setw(9) << std::fixed << std::setprecision(2)
-                  << z.koszt << " " << "\n";
-    }
-
-    // --- Pomocnicze -----------------------------------------------------
-
-    static std::string naMale(std::string s) {
-        std::transform(s.begin(), s.end(), s.begin(),
-                       [](unsigned char c) { return std::tolower(c); });
-        return s;
-    }
-
-    static std::string skroc(const std::string& s, std::size_t maks) {
-        if (s.size() <= maks) return s;
-        return s.substr(0, maks > 1 ? maks - 1 : 1) + ".";
-    }
-
-    // Ucieczka separatora/nowej linii przy zapisie CSV.
-    static std::string escape(const std::string& s) {
-        std::string out;
-        for (char c : s) {
-            if (c == ';')      out += "\\;";
-            else if (c == '\n') out += "\\n";
-            else if (c == '\\') out += "\\\\";
-            else                out += c;
-        }
-        return out;
-    }
-
-    static std::string unescape(const std::string& s) {
-        std::string out;
-        for (std::size_t i = 0; i < s.size(); ++i) {
-            if (s[i] == '\\' && i + 1 < s.size()) {
-                char n = s[++i];
-                if (n == 'n')      out += '\n';
-                else               out += n;   // ';' lub '\\'
-            } else {
-                out += s[i];
-            }
-        }
-        return out;
-    }
-
-    // Podzial wiersza CSV po separatorze, z poszanowaniem ucieczek '\;'.
-    static std::vector<std::string> podziel(const std::string& s, char sep) {
-        std::vector<std::string> pola;
-        std::string biezace;
-        for (std::size_t i = 0; i < s.size(); ++i) {
-            if (s[i] == '\\' && i + 1 < s.size()) {
-                biezace += s[i];
-                biezace += s[++i];             // zachowaj sekwencje ucieczki
-            } else if (s[i] == sep) {
-                pola.push_back(biezace);
-                biezace.clear();
-            } else {
-                biezace += s[i];
-            }
-        }
-        pola.push_back(biezace);
-        return pola;
+                  << z.koszt << "\n";
     }
 };
 
-// ---------------------------------------------------------------------------
+// ===========================================================================
 //  Warstwa interfejsu (menu konsolowe)
-// ---------------------------------------------------------------------------
+// ===========================================================================
 
 void wyczyscWejscie() {
     std::cin.clear();
     std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 }
-
-// Pobranie liczby calkowitej z walidacja.
 int wczytajInt(const std::string& monit) {
-    int wartosc;
-    while (true) {
-        std::cout << monit;
-        if (std::cin >> wartosc) {
-            wyczyscWejscie();
-            return wartosc;
-        }
+    int w;
+    while (std::cout << monit, !(std::cin >> w)) {
         std::cout << "  !! Podaj liczbe calkowita.\n";
         wyczyscWejscie();
     }
+    wyczyscWejscie();
+    return w;
 }
-
-// Pobranie liczby zmiennoprzecinkowej z walidacja.
 double wczytajDouble(const std::string& monit) {
-    double wartosc;
-    while (true) {
-        std::cout << monit;
-        if (std::cin >> wartosc) {
-            wyczyscWejscie();
-            return wartosc;
-        }
+    double w;
+    while (std::cout << monit, !(std::cin >> w)) {
         std::cout << "  !! Podaj liczbe (np. 149.99).\n";
         wyczyscWejscie();
     }
+    wyczyscWejscie();
+    return w;
 }
-
-// Pobranie linii tekstu.
 std::string wczytajTekst(const std::string& monit) {
     std::cout << monit;
     std::string s;
@@ -375,36 +395,47 @@ std::string wczytajTekst(const std::string& monit) {
 }
 
 void banner() {
-    std::cout << "\n";
-    std::cout << "  ============================================================\n";
-    std::cout << "   SerwisPro Mini  |  konsolowy system zlecen serwisowych\n";
-    std::cout << "   Pelna wersja: serwispro.vernex.pl\n";
-    std::cout << "   Kod: github.com/Vernex2026/SerwisPRO\n";
-    std::cout << "  ============================================================\n";
+    std::cout << "\n  ============================================================\n"
+              <<   "   SerwisPro Mini  |  konsolowy system zlecen serwisowych\n"
+              <<   "   Pelna wersja: serwispro.vernex.pl\n"
+              <<   "   Kod: github.com/Vernex2026/SerwisPRO\n"
+              <<   "  ============================================================\n";
+}
+void menu() {
+    std::cout << "\n  --- MENU ---------------------------------------------------\n"
+              <<   "   1. Dodaj zlecenie\n"
+              <<   "   2. Lista zlecen\n"
+              <<   "   3. Lista wg kosztu (malejaco)\n"
+              <<   "   4. Zmien status\n"
+              <<   "   5. Szukaj po ID (z historia)\n"
+              <<   "   6. Szukaj po kliencie\n"
+              <<   "   7. Ustaw koszt naprawy\n"
+              <<   "   8. Gotowe do odbioru\n"
+              <<   "   9. Usun zlecenie\n"
+              <<   "  10. Statystyki\n"
+              <<   "  11. Zapisz do pliku (CSV)\n"
+              <<   "   0. Wyjscie (autozapis)\n"
+              <<   "  ------------------------------------------------------------\n";
 }
 
-void menu() {
-    std::cout << "\n  --- MENU ---------------------------------------------------\n";
-    std::cout << "   1. Dodaj zlecenie\n";
-    std::cout << "   2. Lista zlecen\n";
-    std::cout << "   3. Lista wg kosztu (malejaco)\n";
-    std::cout << "   4. Zmien status\n";
-    std::cout << "   5. Szukaj po ID\n";
-    std::cout << "   6. Szukaj po kliencie\n";
-    std::cout << "   7. Ustaw koszt naprawy\n";
-    std::cout << "   8. Gotowe do odbioru\n";
-    std::cout << "   9. Usun zlecenie\n";
-    std::cout << "  10. Statystyki\n";
-    std::cout << "  11. Zapisz do pliku (CSV)\n";
-    std::cout << "   0. Wyjscie (autozapis)\n";
-    std::cout << "  ------------------------------------------------------------\n";
+void akcjaDodaj(Serwis& s) {
+    std::string klient = wczytajTekst("  Klient: ");
+    std::string tel    = wczytajTekst("  Telefon: ");
+    std::string urz    = wczytajTekst("  Urzadzenie: ");
+    std::string opis   = wczytajTekst("  Opis usterki: ");
+    std::cout << "  Priorytet: 1=Niski  2=Normalny  3=Pilny\n";
+    int p = wczytajInt("  Wybor: ");
+    Priorytet prio = (p == 1) ? Priorytet::Niski
+                   : (p == 3) ? Priorytet::Pilny
+                              : Priorytet::Normalny;
+    int id = s.dodaj(klient, tel, urz, opis, prio);
+    std::cout << "  OK: utworzono zlecenie SRV-" << id << "\n";
 }
 
 void akcjaZmienStatus(Serwis& s) {
-    int id = wczytajInt("  Podaj ID (np. 3): ");
+    int id = wczytajInt("  Podaj ID: ");
     std::cout << "  Status: 1=Przyjete  2=W trakcie  3=Gotowe  4=Wydane\n";
-    int w = wczytajInt("  Wybor: ");
-    switch (w) {
+    switch (wczytajInt("  Wybor: ")) {
         case 1: s.zmienStatus(id, Status::Przyjete); break;
         case 2: s.zmienStatus(id, Status::WTrakcie); break;
         case 3: s.zmienStatus(id, Status::Gotowe);   break;
@@ -415,58 +446,41 @@ void akcjaZmienStatus(Serwis& s) {
 
 int main() {
     Serwis serwis;
-    serwis.wczytaj();   // trwalosc: dane z poprzedniego uruchomienia
+    serwis.wczytaj();
 
     banner();
-    std::cout << "  (Wczytano dane z pliku " << Serwis::PLIK
-              << ", jesli istnial.)\n";
+    std::cout << "  (Wczytano dane z pliku " << Serwis::PLIK << ", jesli istnial.)\n";
 
-    bool dziala = true;
-    while (dziala) {
+    for (bool dziala = true; dziala; ) {
         menu();
         int wybor = wczytajInt("  Twoj wybor: ");
         std::cout << "\n";
         switch (wybor) {
-            case 1: {
-                std::string klient = wczytajTekst("  Klient: ");
-                std::string tel    = wczytajTekst("  Telefon: ");
-                std::string urz    = wczytajTekst("  Urzadzenie: ");
-                std::string opis   = wczytajTekst("  Opis usterki: ");
-                int id = serwis.dodaj(klient, tel, urz, opis);
-                std::cout << "  OK: utworzono zlecenie SRV-" << id << "\n";
-                break;
-            }
-            case 2:  serwis.lista();               break;
-            case 3:  serwis.lista(true);           break;
-            case 4:  akcjaZmienStatus(serwis);     break;
+            case 1:  akcjaDodaj(serwis);       break;
+            case 2:  serwis.lista();           break;
+            case 3:  serwis.lista(true);       break;
+            case 4:  akcjaZmienStatus(serwis); break;
             case 5:  serwis.szukajPoId(wczytajInt("  Podaj ID: ")); break;
             case 6:  serwis.szukajPoKliencie(wczytajTekst("  Klient (fragment): ")); break;
             case 7: {
                 int id = wczytajInt("  Podaj ID: ");
-                double k = wczytajDouble("  Koszt (zl): ");
-                serwis.ustawKoszt(id, k);
+                serwis.ustawKoszt(id, wczytajDouble("  Koszt (zl): "));
                 break;
             }
-            case 8:  serwis.gotoweDoOdbioru();     break;
+            case 8:  serwis.gotoweDoOdbioru(); break;
             case 9:  serwis.usun(wczytajInt("  Podaj ID do usuniecia: ")); break;
-            case 10: serwis.statystyki();          break;
-            case 11:
-                std::cout << (serwis.zapisz()
-                    ? "  OK: zapisano do " + std::string(Serwis::PLIK) + "\n"
-                    : "  !! Blad zapisu pliku.\n");
-                break;
-            case 0:
-                dziala = false;
-                break;
-            default:
-                std::cout << "  !! Nieznana opcja.\n";
+            case 10: serwis.statystyki();      break;
+            case 11: std::cout << (serwis.zapisz()
+                        ? "  OK: zapisano do " + std::string(Serwis::PLIK) + "\n"
+                        : "  !! Blad zapisu pliku.\n");
+                     break;
+            case 0:  dziala = false;           break;
+            default: std::cout << "  !! Nieznana opcja.\n";
         }
     }
 
-    if (serwis.zapisz())
-        std::cout << "\n  Autozapis OK -> " << Serwis::PLIK << ". Do zobaczenia!\n";
-    else
-        std::cout << "\n  !! Autozapis nieudany.\n";
-
+    std::cout << (serwis.zapisz()
+        ? "\n  Autozapis OK -> " + std::string(Serwis::PLIK) + ". Do zobaczenia!\n"
+        : "\n  !! Autozapis nieudany.\n");
     return 0;
 }
