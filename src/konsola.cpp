@@ -26,24 +26,28 @@ void wyczyscWejscie() {
     std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 }
 
+// Uwaga: przy koncu wejscia (EOF) zwracamy 0 zamiast petlic w nieskonczonosc.
+// Petla menu wykrywa EOF osobno (std::cin.eof()) i konczy program z autozapisem.
 int wczytajInt(const std::string& monit) {
     int w;
-    while (std::cout << monit, !(std::cin >> w)) {
+    while (true) {
+        std::cout << monit;
+        if (std::cin >> w)      { wyczyscWejscie(); return w; }
+        if (std::cin.eof())     { std::cout << "\n"; return 0; }
         std::cout << "  !! Podaj liczbe calkowita.\n";
         wyczyscWejscie();
     }
-    wyczyscWejscie();
-    return w;
 }
 
 double wczytajDouble(const std::string& monit) {
     double w;
-    while (std::cout << monit, !(std::cin >> w)) {
+    while (true) {
+        std::cout << monit;
+        if (std::cin >> w)      { wyczyscWejscie(); return w; }
+        if (std::cin.eof())     { std::cout << "\n"; return 0.0; }
         std::cout << "  !! Podaj liczbe (np. 149.99).\n";
         wyczyscWejscie();
     }
-    wyczyscWejscie();
-    return w;
 }
 
 std::string wczytajTekst(const std::string& monit) {
@@ -234,6 +238,7 @@ void Aplikacja::uruchom() {
     for (bool dziala = true; dziala; ) {
         menu();
         int wybor = wczytajInt("  Twoj wybor: ");
+        if (std::cin.eof()) break;   // koniec wejscia (np. Ctrl+D) -> wyjscie
         std::cout << "\n";
         switch (wybor) {
             case 1:  obsluzDodaj();            break;
