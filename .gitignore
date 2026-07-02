@@ -1,0 +1,10 @@
+# Zbudowany plik wykonywalny
+serwis
+serwis.exe
+
+# Pliki obiektowe / posrednie
+*.o
+*.obj
+
+# Dane runtime (baza zlecen)
+zlecenia.csv
